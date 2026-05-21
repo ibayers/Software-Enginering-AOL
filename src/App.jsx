@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Map, Navigation2, FileWarning, Search, Car, AlertTriangle, 
-  CheckCircle, Mountain, X, Bike, Info, List, MapPin, Navigation, ArrowLeft
+  CheckCircle, Mountain, X, Bike, Info, List, MapPin, Navigation, ArrowLeft, Trash2
 } from 'lucide-react';
+import { supabase } from './lib/supabase';
 import kawahRatuImg from './assets/kawahratu.jpeg';
 import tanjungLesungImg from './assets/tanjunglesung.jpeg';
 import baduyDalamImg from './assets/baduy.jpg';
@@ -30,6 +31,8 @@ const DESTINATIONS = [
     parking_name: 'Pos Pendakian Cangkuang',
     parking_lat: -6.7050,
     parking_lng: 106.6600,
+    shortcut_lat: -6.6500,
+    shortcut_lng: 106.7500,
     reports: [
       { user: 'Budi (Jeep)', msg: 'Jalan akses pasca hujan licin parah. Wajib 4WD atau rantai ban.', sev: 4, time: '2 jam lalu' }
     ]
@@ -45,6 +48,8 @@ const DESTINATIONS = [
     lng: 105.6601,
     req_capability: 1, 
     trekking_required: false,
+    shortcut_lat: -6.4600,
+    shortcut_lng: 105.6700,
     reports: [
       { user: 'Andi', msg: 'Jalanan cor beton mulus, sedikit berlubang di area pasar.', sev: 1, time: '1 hari lalu' }
     ]
@@ -63,6 +68,8 @@ const DESTINATIONS = [
     parking_name: 'Terminal Ciboleger',
     parking_lat: -6.5810,
     parking_lng: 106.2550,
+    shortcut_lat: -6.5850,
+    shortcut_lng: 106.2450,
     reports: [
       { user: 'Traveler22', msg: 'Mobil hanya bisa sampai Terminal Ciboleger. Sisa 10km jalan kaki bukit.', sev: 3, time: '5 jam lalu' }
     ]
@@ -77,11 +84,11 @@ const calculateFeasibility = (dest, vehicle) => {
   } else if (vehicle.capability === dest.req_capability - 1) {
     return { status: 'Perlu Kewaspadaan', risk: 'Medium', color: 'bg-orange-100 text-orange-700', routeColor: '#f59e0b', score: 65 };
   } else {
-    return { status: 'Sangat Berbahaya / Tidak Disarankan', risk: 'High', color: 'bg-red-100 text-red-700', routeColor: '#ef4444', score: 25 };
+    return { status: 'Sangat Berbahaya ', risk: 'High', color: 'bg-red-100 text-red-700', routeColor: '#ef4444', score: 25 };
   }
 };
 
-const DestinationDetail = ({ dest, vehicle, onClose, onNavigate }) => {
+const DestinationDetail = ({ dest, vehicle, onClose, onNavigate, onDeleteReport }) => {
   const feas = calculateFeasibility(dest, vehicle);
 
   return (
@@ -136,8 +143,19 @@ const DestinationDetail = ({ dest, vehicle, onClose, onNavigate }) => {
           {dest.reports.map((r, i) => (
             <div key={i} className="bg-slate-50 border border-slate-100 p-3 rounded-xl shadow-sm">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-bold text-slate-700">{r.user}</span>
-                <span className="text-[10px] text-slate-500">{r.time}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-700">{r.user}</span>
+                  <span className="text-[10px] text-slate-500">{r.time}</span>
+                </div>
+                {r.id && onDeleteReport && (
+                  <button 
+                    onClick={() => onDeleteReport(dest.id, r.id)}
+                    className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
+                    title="Hapus Laporan"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
               <p className="text-xs text-slate-600">{r.msg}</p>
               <div className="mt-2 flex items-center gap-1">
@@ -175,6 +193,13 @@ const DIFFICULTY_META = {
 };
 
 const ExploreTab = ({ selectedVehicle, setSelectedVehicle, onSelectDest, destinations }) => {
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredDestinations = destinations.filter(d => 
+    d.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    d.category.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
     <div className="h-full flex flex-col bg-[#f0f2f8] overflow-y-auto">
 
@@ -187,10 +212,16 @@ const ExploreTab = ({ selectedVehicle, setSelectedVehicle, onSelectDest, destina
         <p className="text-indigo-200 text-xs font-semibold tracking-widest uppercase mb-1">Voyager Go</p>
         <h1 className="text-2xl font-black leading-tight mb-4">Mau Kemana<br/>Hari Ini? 🧭</h1>
 
-        {/* Search bar (decorative) */}
-        <div className="bg-white/15 backdrop-blur-sm flex items-center gap-2 px-3 py-2.5 rounded-xl mb-5 border border-white/20">
+        {/* Search bar */}
+        <div className="bg-white/15 backdrop-blur-sm flex items-center gap-2 px-3 py-2.5 rounded-xl mb-5 border border-white/20 focus-within:bg-white/25 focus-within:border-white/40 transition-colors">
           <Search size={14} className="text-white/70" />
-          <span className="text-white/50 text-xs">Cari destinasi wisata…</span>
+          <input 
+            type="text" 
+            placeholder="Cari destinasi wisata…" 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="bg-transparent border-none outline-none text-white placeholder:text-white/50 text-xs w-full"
+          />
         </div>
 
         {/* Vehicle chips */}
@@ -218,16 +249,18 @@ const ExploreTab = ({ selectedVehicle, setSelectedVehicle, onSelectDest, destina
         <div className="flex justify-between items-center">
           <div>
             <h2 className="font-black text-slate-800 text-base">Rekomendasi Pintar</h2>
-            <p className="text-slate-400 text-[10px]">{destinations.length} destinasi tersedia</p>
+            <p className="text-slate-400 text-[10px]">{filteredDestinations.length} destinasi tersedia</p>
           </div>
           <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-100">
             {selectedVehicle.name}
           </span>
         </div>
 
-        {destinations.map(d => {
+        {filteredDestinations.map(d => {
           const f = calculateFeasibility(d, selectedVehicle);
           const meta = DIFFICULTY_META[d.category] ?? { color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' };
+          const warningReport = d.reports && d.reports.find(r => r.sev >= 4);
+          const hasWarning = !!warningReport;
           return (
             <div
               key={d.id}
@@ -244,12 +277,20 @@ const ExploreTab = ({ selectedVehicle, setSelectedVehicle, onSelectDest, destina
                   <MapPin size={9} /> {d.distance}
                 </div>
 
-                {/* Trekking badge */}
-                {d.trekking_required && (
-                  <div className="absolute top-2.5 left-2.5 bg-emerald-500/90 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <Mountain size={9} /> Last Mile Trek
-                  </div>
-                )}
+                <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5 items-start">
+                  {/* Trekking badge */}
+                  {d.trekking_required && (
+                    <div className="bg-emerald-500/90 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Mountain size={9} /> Last Mile Trek
+                    </div>
+                  )}
+                  {/* Warning badge */}
+                  {hasWarning && (
+                    <div className="bg-red-500/90 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse uppercase tracking-tight">
+                      <FileWarning size={9} /> {warningReport.type || 'Awas Jalan Rusak'}
+                    </div>
+                  )}
+                </div>
 
                 {/* Name overlay at bottom */}
                 <div className="absolute bottom-0 left-0 right-0 p-3">
@@ -279,10 +320,59 @@ const ExploreTab = ({ selectedVehicle, setSelectedVehicle, onSelectDest, destina
 };
 
 const NavigationTab = ({ targetNavDest, selectedVehicle, setSelectedVehicle, onGoExplore }) => {
+  const [routeOptions, setRouteOptions] = useState([]);
+  const [activeRouteIdx, setActiveRouteIdx] = useState(0);
+  const [useShortcut, setUseShortcut] = useState(false);
+  const mapRef = useRef(null);
+  const layersRef = useRef(null);
+
+  // Clean up map when component unmounts
+  useEffect(() => {
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    setUseShortcut(false);
+  }, [targetNavDest]);
+
   useEffect(() => {
     if (!targetNavDest) return;
+    const dest = targetNavDest;
+    const isMotor = selectedVehicle.id === 'motor';
+    const routingProfile = isMotor ? 'bike' : 'driving';
+    const vehicleDestLat = dest.trekking_required ? dest.parking_lat : dest.lat;
+    const vehicleDestLng = dest.trekking_required ? dest.parking_lng : dest.lng;
 
-    let mapInstance = null;
+    const fetchRoute = async () => {
+      try {
+        let url = `https://router.project-osrm.org/route/v1/${routingProfile}/${JAKARTA_LATLNG[1]},${JAKARTA_LATLNG[0]};${vehicleDestLng},${vehicleDestLat}?overview=full&geometries=geojson&alternatives=true`;
+        
+        if (useShortcut && dest.shortcut_lat && dest.shortcut_lng) {
+          url = `https://router.project-osrm.org/route/v1/${routingProfile}/${JAKARTA_LATLNG[1]},${JAKARTA_LATLNG[0]};${dest.shortcut_lng},${dest.shortcut_lat};${vehicleDestLng},${vehicleDestLat}?overview=full&geometries=geojson&alternatives=true`;
+        }
+
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.routes && data.routes.length > 0) {
+          setRouteOptions(data.routes);
+          setActiveRouteIdx(0);
+        }
+      } catch (err) {
+        console.error("Routing error:", err);
+      }
+    };
+
+    fetchRoute();
+  }, [targetNavDest, selectedVehicle, useShortcut]);
+
+  useEffect(() => {
+    if (!targetNavDest || routeOptions.length === 0) return;
 
     const initMap = () => {
       if (!window.L) {
@@ -291,79 +381,114 @@ const NavigationTab = ({ targetNavDest, selectedVehicle, setSelectedVehicle, onG
       }
 
       const dest = targetNavDest;
-      const isMotor = selectedVehicle.id === 'motor';
-      const routingProfile = isMotor ? 'bike' : 'driving';
       const feas = calculateFeasibility(dest, selectedVehicle);
       
       const container = document.getElementById('nav-map-container');
       if (!container) return;
 
-      if (mapInstance) {
-          mapInstance.remove();
+      if (!mapRef.current) {
+          mapRef.current = window.L.map('nav-map-container', { 
+            zoomControl: false,
+            attributionControl: false 
+          }).setView(JAKARTA_LATLNG, 13);
+          
+          window.L.tileLayer('https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+          }).addTo(mapRef.current);
+
+          layersRef.current = window.L.layerGroup().addTo(mapRef.current);
+      } else {
+          layersRef.current.clearLayers();
       }
 
-      mapInstance = window.L.map('nav-map-container', { 
-        zoomControl: false,
-        attributionControl: false 
-      }).setView(JAKARTA_LATLNG, 13);
-      
-      window.L.tileLayer('https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-      }).addTo(mapInstance);
+      const layerGroup = layersRef.current;
+      const mapInstance = mapRef.current;
 
       const vehicleDestLat = dest.trekking_required ? dest.parking_lat : dest.lat;
       const vehicleDestLng = dest.trekking_required ? dest.parking_lng : dest.lng;
 
-      window.L.circleMarker(JAKARTA_LATLNG, { color: 'black', fillColor: 'white', fillOpacity: 1, radius: 6, weight: 3 }).addTo(mapInstance);
+      window.L.circleMarker(JAKARTA_LATLNG, { color: 'black', fillColor: 'white', fillOpacity: 1, radius: 6, weight: 3 }).addTo(layerGroup);
 
       const parkingIconHtml = `<div style="background-color: ${feas.routeColor}; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3); font-size: 12px;">P</div>`;
       const parkingIcon = window.L.divIcon({ html: parkingIconHtml, className: '', iconSize: [24,24], iconAnchor: [12,12] });
-      window.L.marker([vehicleDestLat, vehicleDestLng], { icon: parkingIcon }).addTo(mapInstance);
+      window.L.marker([vehicleDestLat, vehicleDestLng], { icon: parkingIcon }).addTo(layerGroup);
 
       if (dest.trekking_required) {
         const destIconHtml = `<div style="background-color: #10b981; color: white; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"></div>`;
         const destIcon = window.L.divIcon({ html: destIconHtml, className: '', iconSize: [14,14], iconAnchor: [7,7] });
-        window.L.marker([dest.lat, dest.lng], { icon: destIcon }).addTo(mapInstance);
+        window.L.marker([dest.lat, dest.lng], { icon: destIcon }).addTo(layerGroup);
       }
 
-      const fetchRoute = async () => {
-        try {
-          const url = `https://router.project-osrm.org/route/v1/${routingProfile}/${JAKARTA_LATLNG[1]},${JAKARTA_LATLNG[0]};${vehicleDestLng},${vehicleDestLat}?overview=full&geometries=geojson`;
-          const res = await fetch(url);
-          const data = await res.json();
+      const bounds = window.L.latLngBounds();
+      const hasWarning = dest.reports && dest.reports.some(r => r.sev >= 4);
+      
+      // Draw alternatives first
+      routeOptions.forEach((route, idx) => {
+        if (idx === activeRouteIdx) return;
+        const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+        const isMainWithWarning = (idx === 0 && hasWarning);
+        const isAltForWarning = (idx !== 0 && hasWarning);
+        const altColor = isMainWithWarning ? '#ef4444' : isAltForWarning ? '#10b981' : '#94a3b8';
+        const altOpacity = isMainWithWarning ? 0.9 : 0.8;
+        window.L.polyline(coords, { color: altColor, opacity: altOpacity, weight: 4, dashArray: '5, 8' }).addTo(layerGroup);
+        bounds.extend(coords);
+      });
 
-          if (data.routes && data.routes[0]) {
-            const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-            
-            window.L.polyline(coords, { color: '#000000', opacity: 0.15, weight: 8 }).addTo(mapInstance);
-            window.L.polyline(coords, { color: feas.routeColor, opacity: 0.9, weight: 5 }).addTo(mapInstance);
-
-            const bounds = window.L.latLngBounds(coords);
-            
-            if (dest.trekking_required) {
-              const walkCoords = [ [vehicleDestLat, vehicleDestLng], [dest.lat, dest.lng] ];
-              window.L.polyline(walkCoords, { color: '#10b981', weight: 4, dashArray: '5, 8' }).addTo(mapInstance);
-              bounds.extend(walkCoords);
+      // Draw active route last
+      const activeRoute = routeOptions[activeRouteIdx];
+      if (activeRoute) {
+        const coords = activeRoute.geometry.coordinates.map(c => [c[1], c[0]]);
+        window.L.polyline(coords, { color: '#000000', opacity: 0.15, weight: 8 }).addTo(layerGroup);
+        
+        let activeRouteColor = feas.routeColor;
+        if (hasWarning) {
+            if (useShortcut) {
+                activeRouteColor = '#10b981';
+            } else {
+                if (activeRouteIdx === 0) activeRouteColor = '#ef4444';
+                else activeRouteColor = '#10b981';
             }
-
-            mapInstance.fitBounds(bounds, { padding: [40, 150] }); 
-          }
-        } catch (err) {
-          console.error("Routing error:", err);
         }
-      };
 
-      fetchRoute();
+        window.L.polyline(coords, { color: activeRouteColor, opacity: 0.9, weight: 5 }).addTo(layerGroup);
+        bounds.extend(coords);
+      }
+
+      if (useShortcut && dest.shortcut_lat && dest.shortcut_lng) {
+        const shortcutIconHtml = `<div style="background-color: #3b82f6; color: white; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3); font-size: 8px;">S</div>`;
+        const shortcutIcon = window.L.divIcon({ html: shortcutIconHtml, className: '', iconSize: [16,16], iconAnchor: [8,8] });
+        window.L.marker([dest.shortcut_lat, dest.shortcut_lng], { icon: shortcutIcon })
+          .bindTooltip("Jalan Pintas", { permanent: true, direction: 'top', className: 'font-bold text-blue-600 border-blue-200 text-[10px]' })
+          .addTo(layerGroup);
+      }
+
+      if (hasWarning && routeOptions[0] && !useShortcut) {
+        const warningReport = dest.reports.find(r => r.sev >= 4);
+        const warningType = warningReport && warningReport.type ? warningReport.type : "Awas! Jalan Rusak";
+
+        const mainRouteCoords = routeOptions[0].geometry.coordinates;
+        // Simulate hazard location somewhere along the main route
+        const hazardPoint = mainRouteCoords[Math.floor(mainRouteCoords.length * 0.6)];
+        const warningIconHtml = `<div class="bg-red-500 w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-lg animate-pulse" style="font-size: 12px;">⚠️</div>`;
+        const warningIcon = window.L.divIcon({ html: warningIconHtml, className: '', iconSize: [24,24], iconAnchor: [12,12] });
+        window.L.marker([hazardPoint[1], hazardPoint[0]], { icon: warningIcon })
+          .bindTooltip(warningType, { permanent: true, direction: 'top', className: 'font-bold text-red-600 border-red-200 text-[10px] whitespace-normal max-w-[150px] text-center uppercase tracking-tight' })
+          .addTo(layerGroup);
+      }
+
+      if (dest.trekking_required) {
+        const walkCoords = [ [vehicleDestLat, vehicleDestLng], [dest.lat, dest.lng] ];
+        window.L.polyline(walkCoords, { color: '#10b981', weight: 4, dashArray: '5, 8' }).addTo(layerGroup);
+        bounds.extend(walkCoords);
+      }
+
+      if (bounds.isValid()) {
+        mapInstance.fitBounds(bounds, { padding: [40, 150] }); 
+      }
     };
 
     initMap();
-
-    return () => { 
-        if (mapInstance) {
-            mapInstance.remove(); 
-        }
-    };
-  }, [targetNavDest, selectedVehicle]);
+  }, [targetNavDest, selectedVehicle, routeOptions, activeRouteIdx, useShortcut]);
 
   if (!targetNavDest) {
     return (
@@ -391,30 +516,75 @@ const NavigationTab = ({ targetNavDest, selectedVehicle, setSelectedVehicle, onG
           <div className="bg-slate-900/90 backdrop-blur-md rounded-2xl p-3 shadow-xl text-white flex items-center gap-3">
             <Navigation2 size={24} className="text-indigo-400 rotate-45" />
             <div>
-              <p className="text-xl font-bold">2.4 <span className="text-xs text-slate-300 font-medium">km</span></p>
+              <p className="text-xl font-bold">{targetNavDest.distance.replace(/ km/i, '')} <span className="text-xs text-slate-300 font-medium">km</span></p>
               <p className="text-slate-300 text-[11px]">Menuju {targetNavDest.name}</p>
             </div>
           </div>
           
-          {feasibility.risk !== 'Low' && (
-            <div className="bg-red-50/95 backdrop-blur-md border border-red-200 rounded-xl p-2 flex items-start gap-2 shadow-sm animate-pulse">
-              <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-[11px] font-bold text-red-700">Peringatan Bahaya Jarak Dekat</p>
-                <p className="text-[9px] text-red-600 mt-0.5 leading-tight">Medan ini sulit dilalui oleh kendaraan Anda. Hati-hati.</p>
-              </div>
-            </div>
-          )}
+          {(() => {
+            const warningReport = targetNavDest.reports && targetNavDest.reports.find(r => r.sev >= 4);
+            const hasDamage = !!warningReport;
+            const hasFeasibility = feasibility.risk !== 'Low';
+            const hasTrekking = targetNavDest.trekking_required;
 
-          {targetNavDest.trekking_required && (
-            <div className="bg-emerald-50/95 backdrop-blur-md border border-emerald-300 rounded-xl p-2 flex items-start gap-2 shadow-md">
-              <Mountain size={18} className="text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-[10px] font-black text-emerald-800 uppercase tracking-wide">Last Mile: Trekking</p>
-                <p className="text-[9px] text-emerald-700 mt-0.5 font-medium leading-tight">Parkir di <b>{targetNavDest.parking_name}</b>. Lanjut jalan kaki.</p>
-              </div>
-            </div>
-          )}
+            if (hasDamage) {
+              return (
+                <div className="bg-orange-50/95 backdrop-blur-md border border-orange-300 rounded-xl p-2 flex flex-col gap-2 shadow-sm">
+                  <div className="flex items-start gap-2">
+                    <FileWarning size={16} className="text-orange-500 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-[11px] font-bold text-orange-700 uppercase tracking-tight">{warningReport.type || 'Peringatan Terkini!'}</p>
+                      <p className="text-[10px] text-orange-600 mt-0.5 leading-snug italic line-clamp-2">
+                        "{warningReport.msg}"
+                      </p>
+                      <p className="text-[8px] text-orange-500 mt-1 font-medium bg-orange-100/50 inline-block px-1.5 py-0.5 rounded">
+                        Oleh: {warningReport.user} • Severity: {warningReport.sev}/5
+                      </p>
+                    </div>
+                  </div>
+                  {targetNavDest.shortcut_lat && !useShortcut && (
+                    <button 
+                      onClick={() => setUseShortcut(true)}
+                      className="w-full mt-1 py-1.5 bg-orange-100 text-orange-700 hover:bg-orange-200 text-[10px] font-bold rounded-lg border border-orange-200 transition-colors cursor-pointer"
+                    >
+                      Cari Jalan Pintas Aman
+                    </button>
+                  )}
+                  {useShortcut && (
+                    <div className="w-full mt-1 py-1.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded-lg border border-emerald-200 text-center">
+                      ✓ Jalan Pintas Aktif
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            if (hasFeasibility) {
+              return (
+                <div className="bg-red-50/95 backdrop-blur-md border border-red-200 rounded-xl p-2 flex items-start gap-2 shadow-sm animate-pulse">
+                  <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[11px] font-bold text-red-700">Peringatan Kelayakan Kendaraan</p>
+                    <p className="text-[9px] text-red-600 mt-0.5 leading-tight">Medan ini sulit dilalui oleh kendaraan Anda. Hati-hati.</p>
+                  </div>
+                </div>
+              );
+            }
+
+            if (hasTrekking) {
+              return (
+                <div className="bg-emerald-50/95 backdrop-blur-md border border-emerald-300 rounded-xl p-2 flex items-start gap-2 shadow-md">
+                  <Mountain size={18} className="text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[10px] font-black text-emerald-800 uppercase tracking-wide">Last Mile: Trekking</p>
+                    <p className="text-[9px] text-emerald-700 mt-0.5 font-medium leading-tight">Parkir di <b>{targetNavDest.parking_name}</b>. Lanjut jalan kaki.</p>
+                  </div>
+                </div>
+              );
+            }
+
+            return null;
+          })()}
         </div>
       </div>
 
@@ -441,6 +611,36 @@ const NavigationTab = ({ targetNavDest, selectedVehicle, setSelectedVehicle, onG
                 Status: <span className="font-bold">{feasibility.status}</span>
             </p>
           </div>
+
+          {routeOptions.length > 1 && (
+            <div className="border-t border-slate-100 pt-2 mb-2">
+              <p className="text-[9px] text-slate-500 font-medium mb-1.5">Pilihan Rute Alternatif (Pintas):</p>
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                {routeOptions.map((r, i) => {
+                  const isMainWithWarning = (i === 0 && targetNavDest.reports && targetNavDest.reports.some(rep => rep.sev >= 4));
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setActiveRouteIdx(i)}
+                      className={`px-3 py-1.5 rounded-xl border text-[9px] font-bold whitespace-nowrap transition-all flex flex-col items-center gap-0.5 ${
+                        activeRouteIdx === i 
+                          ? (isMainWithWarning 
+                              ? 'border-red-500 bg-red-50 text-red-700 shadow-sm' 
+                              : 'border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm')
+                          : (isMainWithWarning
+                              ? 'border-red-200 text-red-500 hover:bg-red-50'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50')
+                      }`}
+                    >
+                      <span>Rute {i === 0 ? 'Utama' : `Alternatif ${i}`} ({(r.distance / 1000).toFixed(1)} km)</span>
+                      {isMainWithWarning && i === 0 && <span className="text-[8px] text-red-600">⚠️ Hindari</span>}
+                      {i !== 0 && targetNavDest.reports && targetNavDest.reports.some(rep => rep.sev >= 4) && <span className="text-[8px] text-emerald-600 font-medium">✨ Aman (Cek Medannya)</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="border-t border-slate-100 pt-2">
               <p className="text-[9px] text-slate-500 font-medium mb-1.5">Ganti Kendaraan Untuk Cek Ulang Rute:</p>
@@ -486,16 +686,17 @@ const ReportTab = ({ destinations, onSubmitReport }) => {
       setIsSubmitting(false);
       setIsSuccess(true);
 
-      // Submit data to main state
-      onSubmitReport({
-        destId: selectedDestId,
-        report: {
-          user: 'Anda (Traveler)',
-          msg: comment || `${reportType} terpantau di jalur ini. Harap berhati-hati.`,
-          sev: severity,
-          time: 'Baru saja'
-        }
-      });
+    // Submit data to main state
+    onSubmitReport({
+      destId: selectedDestId,
+      report: {
+        user: 'Anda (Traveler)',
+        msg: comment || `${reportType} terpantau di jalur ini. Harap berhati-hati.`,
+        sev: severity,
+        time: 'Baru saja',
+        type: reportType
+      }
+    });
     }, 1500);
   };
 
@@ -687,6 +888,43 @@ export default function App() {
   const [destinations, setDestinations] = useState(DESTINATIONS);
 
   useEffect(() => {
+    const fetchReports = async () => {
+      if (!supabase) return;
+      try {
+        const { data, error } = await supabase
+          .from('reports')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          setDestinations(prevDest => {
+            return prevDest.map(d => {
+              const destReports = data.filter(r => r.dest_id === d.id).map(r => ({
+                id: r.id,
+                user: r.user_name,
+                msg: r.message,
+                sev: r.severity,
+                time: r.time_label || 'Baru saja',
+                type: r.report_type
+              }));
+              
+              return {
+                ...d,
+                reports: [...destReports, ...(d.reports || [])]
+              };
+            });
+          });
+        }
+      } catch (err) {
+        console.error("Error fetching reports:", err);
+      }
+    };
+    fetchReports();
+  }, []);
+
+  useEffect(() => {
     // Inject Leaflet CSS & JS dynamically mapping
     if (!document.getElementById('leaflet-css')) {
       const link = document.createElement('link');
@@ -709,21 +947,98 @@ export default function App() {
     setCurrentTab('navigate');
   };
 
-  const handleSubmitReport = ({ destId, report }) => {
+  const handleSubmitReport = async ({ destId, report }) => {
+    // Generate temporary ID for optimistic UI
+    const tempId = `temp-${Date.now()}`;
+    const reportWithTempId = { ...report, id: tempId };
+
     setDestinations(prev => prev.map(d => {
       if (d.id === destId) {
         return {
           ...d,
-          reports: [report, ...d.reports]
+          reports: [reportWithTempId, ...d.reports]
         };
       }
       return d;
     }));
 
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('reports').insert([{
+          dest_id: destId,
+          user_name: report.user,
+          message: report.msg,
+          severity: report.sev,
+          report_type: report.type || 'Laporan Pengguna',
+          time_label: report.time
+        }]).select();
+
+        if (error) {
+          console.error("Failed to insert report:", error);
+        } else if (data && data.length > 0) {
+          // Replace tempId with actual DB id
+          const realId = data[0].id;
+          setDestinations(prev => prev.map(d => {
+            if (d.id === destId) {
+              return {
+                ...d,
+                reports: d.reports.map(r => r.id === tempId ? { ...r, id: realId } : r)
+              };
+            }
+            return d;
+          }));
+        }
+      } catch (err) {
+        console.error("Failed to insert report exception:", err);
+      }
+    }
+
     // Beautiful delay redirect to ensure they feel the success popup
     setTimeout(() => {
       setCurrentTab('explore');
     }, 2800);
+  };
+
+  const handleDeleteReport = async (destId, reportId) => {
+    // Confirmation dialog
+    const isConfirm = window.confirm("Apakah Anda yakin ingin menghapus laporan ini?");
+    if (!isConfirm) return;
+
+    let backupReports = [];
+
+    // Optimistic UI update
+    setDestinations(prev => prev.map(d => {
+      if (d.id === destId) {
+        backupReports = d.reports; // Save backup for rollback
+        return {
+          ...d,
+          reports: d.reports.filter(r => r.id !== reportId)
+        };
+      }
+      return d;
+    }));
+
+    if (supabase && reportId && (!String(reportId).startsWith('temp-'))) {
+      try {
+        const { data, error } = await supabase.from('reports').delete().eq('id', reportId).select();
+        
+        if (error) {
+          console.error("Supabase delete error:", error);
+          alert("Gagal menghapus laporan di database: " + error.message);
+          // Rollback
+          setDestinations(prev => prev.map(d => d.id === destId ? { ...d, reports: backupReports } : d));
+        } else if (data && data.length === 0) {
+          console.warn("Delete executed but 0 rows affected. Check Supabase RLS Policy.");
+          alert("Data tidak terhapus di database. Kemungkinan besar disebabkan oleh RLS (Row Level Security) Supabase. Pastikan Anda telah membuat 'Policy' di tabel 'reports' yang mengizinkan operasi DELETE untuk publik/anonim.");
+          // Rollback
+          setDestinations(prev => prev.map(d => d.id === destId ? { ...d, reports: backupReports } : d));
+        }
+      } catch (err) {
+        console.error("Failed to delete report exception:", err);
+        // Rollback
+        setDestinations(prev => prev.map(d => d.id === destId ? { ...d, reports: backupReports } : d));
+      }
+    }
   };
 
   // Keep references to active details reactive
@@ -732,7 +1047,7 @@ export default function App() {
 
   return (
     <div className="w-full h-screen max-h-[100dvh] bg-slate-900 flex items-center justify-center font-sans">
-      <div className="w-full max-w-[400px] h-full sm:h-[800px] sm:max-h-[90vh] bg-white sm:rounded-[40px] shadow-2xl relative flex flex-col sm:border-[8px] border-slate-800 overflow-hidden">
+      <div className="w-full max-w-[400px] h-full sm:h-[800px] sm:max-h-[100vh] bg-white sm:rounded-[40px] shadow-2xl relative flex flex-col sm:border-[8px] border-slate-800 overflow-hidden">
         
         <div className="flex-1 relative overflow-hidden h-full">
           {currentTab === 'explore' && (
@@ -764,6 +1079,7 @@ export default function App() {
                 vehicle={selectedVehicle} 
                 onClose={() => setSelectedDest(null)}
                 onNavigate={handleStartNavigation}
+                onDeleteReport={handleDeleteReport}
              />
           )}
         </div>
