@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Map, Navigation2, FileWarning, Search, Car, AlertTriangle, 
+import {
+  Map, Navigation2, FileWarning, Search, Car, AlertTriangle,
   CheckCircle, Mountain, X, Bike, Info, List, MapPin, Navigation, ArrowLeft, Trash2
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { useAuth } from './contexts/AuthContext';
+import AuthScreen from './components/AuthScreen';
+import UserMenu from './components/UserMenu';
 import kawahRatuImg from './assets/kawahratu.jpeg';
 import tanjungLesungImg from './assets/tanjunglesung.jpeg';
 import baduyDalamImg from './assets/baduy.jpg';
@@ -667,7 +670,7 @@ const NavigationTab = ({ targetNavDest, selectedVehicle, setSelectedVehicle, onG
   );
 };
 
-const ReportTab = ({ destinations, onSubmitReport }) => {
+const ReportTab = ({ destinations, onSubmitReport, userName }) => {
   const [selectedDestId, setSelectedDestId] = useState(destinations[0]?.id || '');
   const [severity, setSeverity] = useState(3);
   const [reportType, setReportType] = useState('Jalan Berlubang');
@@ -690,7 +693,7 @@ const ReportTab = ({ destinations, onSubmitReport }) => {
     onSubmitReport({
       destId: selectedDestId,
       report: {
-        user: 'Anda (Traveler)',
+        user: userName || 'Anonim',
         msg: comment || `${reportType} terpantau di jalur ini. Harap berhati-hati.`,
         sev: severity,
         time: 'Baru saja',
@@ -881,6 +884,7 @@ const ReportTab = ({ destinations, onSubmitReport }) => {
 };
 
 export default function App() {
+  const { user, loading, userName } = useAuth();
   const [currentTab, setCurrentTab] = useState('explore');
   const [selectedVehicle, setSelectedVehicle] = useState(VEHICLES[1]); // Default MPV
   const [selectedDest, setSelectedDest] = useState(null);
@@ -888,16 +892,16 @@ export default function App() {
   const [destinations, setDestinations] = useState(DESTINATIONS);
 
   useEffect(() => {
+    if (!user || !supabase) return;
     const fetchReports = async () => {
-      if (!supabase) return;
       try {
         const { data, error } = await supabase
           .from('reports')
           .select('*')
           .order('created_at', { ascending: false });
-        
+
         if (error) throw error;
-        
+
         if (data && data.length > 0) {
           setDestinations(prevDest => {
             return prevDest.map(d => {
@@ -909,7 +913,7 @@ export default function App() {
                 time: r.time_label || 'Baru saja',
                 type: r.report_type
               }));
-              
+
               return {
                 ...d,
                 reports: [...destReports, ...(d.reports || [])]
@@ -922,7 +926,7 @@ export default function App() {
       }
     };
     fetchReports();
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     // Inject Leaflet CSS & JS dynamically mapping
@@ -940,6 +944,30 @@ export default function App() {
       document.head.appendChild(script);
     }
   }, []);
+
+  // Show loading while checking auth session
+  if (loading) {
+    return (
+      <div className="w-full h-screen max-h-[100dvh] bg-slate-900 flex items-center justify-center font-sans">
+        <div className="flex items-center gap-3 text-white">
+          <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" />
+          <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:75ms]" />
+          <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:150ms]" />
+        </div>
+      </div>
+    );
+  }
+
+  // Show auth screen if not logged in
+  if (!user) {
+    return (
+      <div className="w-full h-screen max-h-[100dvh] bg-slate-900 flex items-center justify-center font-sans">
+        <div className="w-full max-w-[400px] h-full sm:h-[800px] sm:max-h-[100vh] bg-white sm:rounded-[40px] shadow-2xl relative flex flex-col sm:border-[8px] border-slate-800 overflow-hidden">
+          <AuthScreen />
+        </div>
+      </div>
+    );
+  }
 
   const handleStartNavigation = (dest) => {
     setTargetNavDest(dest);
@@ -970,7 +998,8 @@ export default function App() {
           message: report.msg,
           severity: report.sev,
           report_type: report.type || 'Laporan Pengguna',
-          time_label: report.time
+          time_label: report.time,
+          user_id: user?.id || null
         }]).select();
 
         if (error) {
@@ -1048,7 +1077,12 @@ export default function App() {
   return (
     <div className="w-full h-screen max-h-[100dvh] bg-slate-900 flex items-center justify-center font-sans">
       <div className="w-full max-w-[400px] h-full sm:h-[800px] sm:max-h-[100vh] bg-white sm:rounded-[40px] shadow-2xl relative flex flex-col sm:border-[8px] border-slate-800 overflow-hidden">
-        
+
+        {/* User Menu - top right overlay */}
+        <div className="absolute top-3 right-3 z-50">
+          <UserMenu />
+        </div>
+
         <div className="flex-1 relative overflow-hidden h-full">
           {currentTab === 'explore' && (
              <ExploreTab 
@@ -1067,9 +1101,10 @@ export default function App() {
              />
           )}
           {currentTab === 'report' && (
-            <ReportTab 
+            <ReportTab
               destinations={destinations}
               onSubmitReport={handleSubmitReport}
+              userName={userName}
             />
           )}
 
